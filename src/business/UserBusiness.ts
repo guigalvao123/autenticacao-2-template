@@ -3,6 +3,7 @@ import { GetUsersInput, GetUsersOutput, LoginInput, LoginOutput, SignupInput, Si
 import { BadRequestError } from "../errors/BadRequestError"
 import { NotFoundError } from "../errors/NotFoundError"
 import { User } from "../models/User"
+import { HashManager } from "../services/HashManaget"
 import { IdGenerator } from "../services/IdGenerator"
 import { TokenManager } from "../services/TokenManager"
 import { TokenPayload, USER_ROLES } from "../types"
@@ -11,11 +12,26 @@ export class UserBusiness {
     constructor(
         private userDatabase: UserDatabase,
         private idGenerator: IdGenerator,
-        private tokenManager: TokenManager
+        private tokenManager: TokenManager,
+        private hashManager : HashManager
     ) {}
 
     public getUsers = async (input: GetUsersInput): Promise<GetUsersOutput> => {
-        const { q } = input
+        const { q, token } = input
+
+        if(!token){
+            throw new BadRequestError("Token nao enviado.")
+        }
+
+        const payload = this.tokenManager.getPayload(token)
+
+        if(payload === null){
+            throw new BadRequestError("Token invalido.")
+        }
+
+        if(payload.role !== USER_ROLES.ADMIN){
+            throw new BadRequestError("Usuario nao autorizado.")
+        }
 
         if (typeof q !== "string" && q !== undefined) {
             throw new BadRequestError("'q' deve ser string ou undefined")
@@ -56,13 +72,15 @@ export class UserBusiness {
             throw new BadRequestError("'password' deve ser string")
         }
 
+        const hashedPassword = await this.hashManager.hash(password)
+
         const id = this.idGenerator.generate()
 
         const newUser = new User(
             id,
             name,
             email,
-            password,
+            hashedPassword, // antes aqui era password, eu atualizei para hashedpassword que protege a senha.
             USER_ROLES.NORMAL,
             new Date().toISOString()
         )
@@ -103,7 +121,9 @@ export class UserBusiness {
             throw new NotFoundError("'email' não encontrado")
         }
 
-        if (password !== userDB.password) {
+        const isPasswordCorrect = await this.hashManager.compare(password, userDB.password)
+
+        if (!isPasswordCorrect) {
             throw new BadRequestError("'email' ou 'password' incorretos")
         }
 
